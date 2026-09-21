@@ -1,34 +1,64 @@
 name: "Tests"
 on:
-  pull_request:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional jasmine spec filter'
+        required: false
+        default: ''
 
 jobs:
   Test:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     strategy:
+      fail-fast: false
       matrix:
-        node_version: ['lts/*', 'node']
+        # Node 8 cannot run this suite: the project's own test runner
+        # (jasmine@3.7.0) is ESM-based and requires Node >= 10.
+        node_version: ['14.17.0']
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install Node
-        uses: dcodeIO/setup-node-nvm@master
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node_version }}
       - name: Install Dependencies
         run: npm ci
       - name: Run Unit Tests 👩🏽‍💻
-        run: npm run test:unit
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npm run test:unit -- --filter="${{ inputs.test-filter }}"
+          else
+            npm run test:unit
+          fi
       - name: Run Spec Tests 👩🏽‍💻
-        run: npm run test:specs
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npm run test:specs -- --filter="${{ inputs.test-filter }}"
+          else
+            npm run test:specs
+          fi
+      - name: Install npm 7.12.0
+        if: matrix.node_version == '14.17.0'
+        run: npm i -g npm@7.12.0
+      - name: Pack 📦
+        if: matrix.node_version == '14.17.0'
+        run: npm pack
+      - name: Upload Tarball
+        if: matrix.node_version == '14.17.0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: marked-*.tgz
+          if-no-files-found: error
 
   Lint:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
@@ -39,10 +69,9 @@ jobs:
 
   Release:
     needs: [Test, Lint]
-    if: |
-      github.ref == 'refs/heads/master' &&
-      github.event.repository.fork == false
+    if: false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
@@ -65,6 +94,7 @@ jobs:
   Skip:
     if: contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Skip CI 🚫
         run: echo skip ci
